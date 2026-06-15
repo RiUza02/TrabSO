@@ -1,10 +1,9 @@
 #include <iostream>
 #include <cstring>
+#include <string>
 
-// Definição do nome da memória e do tamanho
 const char* SHM_NAME = "MinhaMemoriaCompartilhada";
 const size_t SHM_SIZE = 1024;
-const char* MENSAGEM = "Ola! Dados vindos do Produtor cross-platform.";
 
 #if defined(_WIN32) || defined(_WIN64)
     // --- CÓDIGO PARA WINDOWS ---
@@ -13,48 +12,43 @@ const char* MENSAGEM = "Ola! Dados vindos do Produtor cross-platform.";
     int main() {
         std::cout << "[Produtor - Windows] Criando memoria compartilhada..." << std::endl;
 
-        // 1. Criar o mapeamento de arquivo na memória paginada do Windows
-        HANDLE hMapFile = CreateFileMappingA(
-            INVALID_HANDLE_VALUE,    // Usa o arquivo de paginação do sistema
-            NULL,                    // Segurança padrão
-            PAGE_READWRITE,          // Permissão de leitura e escrita
-            0,                       // Tamanho máximo (High-order DWORD)
-            SHM_SIZE,                // Tamanho máximo (Low-order DWORD)
-            SHM_NAME                 // Nome do objeto de memória
-        );
-
+        HANDLE hMapFile = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, SHM_SIZE, SHM_NAME);
         if (hMapFile == NULL) {
             std::cerr << "Erro ao criar mapeamento de arquivo (" << GetLastError() << ")." << std::endl;
             return 1;
         }
 
-        // 2. Mapear a visão do arquivo no espaço de endereço do processo
-        char* pBuf = (char*) MapViewOfFile(
-            hMapFile,            // Handle do objeto de mapeamento
-            FILE_MAP_ALL_ACCESS, // Permissão de escrita/leitura
-            0,
-            0,
-            SHM_SIZE
-        );
-
+        char* pBuf = (char*) MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, SHM_SIZE);
         if (pBuf == NULL) {
             std::cerr << "Erro ao mapear a visao do arquivo (" << GetLastError() << ")." << std::endl;
             CloseHandle(hMapFile);
             return 1;
+        }   
+
+        // --- LOOP DE INTERAÇÃO COM O USUÁRIO ---
+        std::string entrada;
+        std::cout << "Memoria compartilhada pronta!" << std::endl;
+        
+        while (true) {
+            std::cout << "Digite uma mensagem (ou 'sair' para encerrar): ";
+            std::getline(std::cin, entrada);
+
+            if (entrada == "sair") {
+                break;
+            }
+
+            // Copia a mensagem digitada para a memória (com segurança para não estourar o tamanho)
+            std::strncpy(pBuf, entrada.c_str(), SHM_SIZE - 1);
+            pBuf[SHM_SIZE - 1] = '\0'; // Garante o caractere nulo no fim
+            
+            std::cout << "[Produtor] Enviado com sucesso!\n" << std::endl;
         }
 
-        // 3. Escrever os dados na memória
-        std::strcpy(pBuf, MENSAGEM);
-        std::cout << "[Produtor] Dados gravados: " << pBuf << std::endl;
-
-        std::cout << "Pressione ENTER para liberar a memoria e encerrar..." << std::endl;
-        std::cin.get();
-
-        // 4. Limpeza de recursos
+        // Limpeza de recursos
         UnmapViewOfFile(pBuf);
         CloseHandle(hMapFile);
         
-        std::cout << "[Produtor] Memoria liberada com sucesso." << std::endl;
+        std::cout << "[Produtor] Memoria liberada. Programa encerrado." << std::endl;
         return 0;
     }
 
@@ -68,8 +62,6 @@ const char* MENSAGEM = "Ola! Dados vindos do Produtor cross-platform.";
     int main() {
         std::cout << "[Produtor - Linux] Criando memoria compartilhada..." << std::endl;
 
-        // 1. Criar o objeto de memória compartilhada POSIX
-        // O nome no Linux deve começar com uma barra '/'
         std::string linux_shm_name = "/" + std::string(SHM_NAME);
         int shm_fd = shm_open(linux_shm_name.c_str(), O_CREAT | O_RDWR, 0666);
         if (shm_fd == -1) {
@@ -77,14 +69,12 @@ const char* MENSAGEM = "Ola! Dados vindos do Produtor cross-platform.";
             return 1;
         }
 
-        // 2. Definir o tamanho do segmento de memória
         if (ftruncate(shm_fd, SHM_SIZE) == -1) {
             std::perror("Erro ao executar ftruncate");
             close(shm_fd);
             return 1;
         }
 
-        // 3. Mapear a memória compartilhada no espaço do processo
         char* pBuf = (char*) mmap(0, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
         if (pBuf == MAP_FAILED) {
             std::perror("Erro ao executar mmap");
@@ -92,19 +82,31 @@ const char* MENSAGEM = "Ola! Dados vindos do Produtor cross-platform.";
             return 1;
         }
 
-        // 4. Escrever os dados na memória
-        std::strcpy(pBuf, MENSAGEM);
-        std::cout << "[Produtor] Dados gravados: " << pBuf << std::endl;
+        // --- LOOP DE INTERAÇÃO COM O USUÁRIO ---
+        std::string entrada;
+        std::cout << "Memoria compartilhada pronta!" << std::endl;
 
-        std::cout << "Pressione ENTER para liberar a memoria e encerrar..." << std::endl;
-        std::cin.get();
+        while (true) {
+            std::cout << "Digite uma mensagem (ou 'sair' para encerrar): ";
+            std::getline(std::cin, entrada);
 
-        // 5. Limpeza de recursos
+            if (entrada == "sair") {
+                break;
+            }
+
+            // Copia a mensagem digitada para a memória
+            std::strncpy(pBuf, entrada.c_str(), SHM_SIZE - 1);
+            pBuf[SHM_SIZE - 1] = '\0';
+            
+            std::cout << "[Produtor] Enviado com sucesso!\n" << std::endl;
+        }
+
+        // Limpeza de recursos
         munmap(pBuf, SHM_SIZE);
         close(shm_fd);
-        shm_unlink(linux_shm_name.c_str()); // Remove o objeto do sistema
+        shm_unlink(linux_shm_name.c_str()); 
 
-        std::cout << "[Produtor] Memoria liberada com sucesso." << std::endl;
+        std::cout << "[Produtor] Memoria liberada. Programa encerrado." << std::endl;
         return 0;
     }
 #endif
